@@ -1,0 +1,57 @@
+{
+  "luci-app-sakura-home": {
+    "description": "Sakura home dashboard",
+    "read": {
+      "ubus": {
+        "luci.sakura_home": [
+          "status",
+          "weather"
+        ],
+        "network.interface": [
+          "dump"
+        ],
+        "luci": [
+          "getInitList"
+        ],
+        "luci.sakura_docker": [
+          "status",
+          "ctl"
+        ]
+      },
+      "file": {
+        "/proc/*": [
+          "read"
+        ],
+        "/sys/*": [
+          "read"
+        ],
+        "/tmp/sysinfo/*": [
+          "read"
+        ],
+        "/tmp/sakura_net.*": [
+          "read",
+          "write"
+        ],
+        "/etc/openwrt_release": [
+          "read"
+        ],
+        "/tmp/sakura_weather.*": [
+          "read"
+        ],
+        "/tmp/sakura_disks.*": [
+          "read"
+        ]
+      }
+    },
+    "write": {
+      "ubus": {
+        "luci": [
+          "setInitAction"
+        ],
+        "luci.sakura_docker": [
+          "ctl"
+        ]
+      }
+    }
+  }
+}

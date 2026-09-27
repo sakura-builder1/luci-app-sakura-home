@@ -1,0 +1,15 @@
+{
+  "admin/sakura-home": {
+    "title": "首页",
+    "order": 1,
+    "action": {
+      "type": "view",
+      "path": "sakura-home"
+    },
+    "depends": {
+      "acl": [
+        "luci-app-sakura-home"
+      ]
+    }
+  }
+}

@@ -1,0 +1,513 @@
+#!/usr/bin/ucode
+// 樱花首页数据后端 (rpcd exec 协议)
+'use strict';
+
+import { readfile, writefile } from 'fs';
+import { connect as ubus_connect } from 'ubus';
+import { cursor as uci_cursor } from 'uci';
+
+function rf(p) { try { return readfile(p); } catch (e) { return null; } }
+function wf(p, s) { try { writefile(p, s); } catch (e) { } }
+function sstr(s) { if (s == null) return ''; return '' + s; }
+function mytrim(s) { return replace(sstr(s), /^\s+|\s+$/g, ''); }
+function num(s) { let n = +s; if (n != n) return 0; return n; }
+function numlist(s) {
+	let out = [];
+	let r = match(s, /\d+/g);
+	if (r) for (let m in r) {
+		let v = (type(m) == 'array') ? m[0] : m;
+		let n = +v;
+		if (n == n) push(out, n);
+	}
+	return out;
+}
+function ex(cmd) { try { let fd = popen(cmd); let s = fd.read('all'); fd.close(); return s; } catch (e) { return ''; } }
+function fmt_size(kb) {
+	let b = kb * 1024;
+	if (b >= 1073741824) return sprintf('%.1f GB', b / 1073741824);
+	if (b >= 1048576) return sprintf('%.0f MB', b / 1048576);
+	return sprintf('%.0f KB', b / 1024);
+}
+function fmt_rate(b) {
+	if (b >= 1048576) return sprintf('%.2f MB/s', b / 1048576);
+	if (b >= 1024) return sprintf('%.2f KB/s', b / 1024);
+	return sprintf('%.0f B/s', b);
+}
+/* 每设备今日流量（读 nlbwmon 缓存 ✓ 按日统计 ✓）*/
+function get_dev_traffic() {
+	let out = [];
+	let c = rf('/tmp/sakura_dev_traffic.cache') || '';
+	let ls = split(c, '\n');
+	for (let i = 0; i < length(ls); i++) {
+		let p = split(ls[i], '|');
+		if (length(p) < 4) continue;
+		let ip = p[0], mac = p[1];
+		let rx = +p[2], tx = +p[3];
+		if (ip == '0.0.0.0' || ip == '') continue;
+		push(out, {
+			ip: ip, mac: mac, rx: rx, tx: tx, total: rx + tx,
+			rx_s: fmt_size(rx / 1024), tx_s: fmt_size(tx / 1024),
+			total_s: fmt_size((rx + tx) / 1024), src: 'nlbw'
+		});
+	}
+	/* 兜底：nlbwmon 没数据时用 conntrack 快照 ✓ */
+	if (length(out) == 0) {
+		let rx = {}, tx = {};
+		let cc = rf('/proc/net/nf_conntrack') || '';
+		let cls = split(cc, '\n');
+		for (let i = 0; i < length(cls); i++) {
+			let ln = cls[i];
+			if (!ln || length(ln) < 20) continue;
+			let segs = split(ln, 'src=');
+			for (let j = 1; j < length(segs); j++) {
+				let sg = segs[j];
+				let mip = match(sg, /^([0-9.]+)/);
+				let mb = match(sg, /bytes=([0-9]+)/);
+				if (!mip || !mb) continue;
+				let s2 = mip[1], by = +mb[1];
+				if (by <= 0) continue;
+				let md = match(sg, /dst=([0-9.]+)/);
+				let d2 = md ? md[1] : '';
+				let SP = /^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/;
+				let sp = match(s2, SP), dp = match(d2, SP);
+				if (sp && !dp) tx[s2] = (tx[s2] || 0) + by;
+				else if (!sp && dp) rx[d2] = (rx[d2] || 0) + by;
+				else if (sp && dp) tx[s2] = (tx[s2] || 0) + by;
+			}
+		}
+		let seen = {};
+		for (let ip in tx) { seen[ip] = 1; }
+		for (let ip in rx) { seen[ip] = 1; }
+		for (let ip in seen) {
+			let r_ = rx[ip] || 0, t_ = tx[ip] || 0;
+			if (r_ + t_ <= 0) continue;
+			push(out, {
+				ip: ip, mac: '', rx: r_, tx: t_, total: r_ + t_,
+				rx_s: fmt_size(r_ / 1024), tx_s: fmt_size(t_ / 1024),
+				total_s: fmt_size((r_ + t_) / 1024), src: 'conntrack'
+			});
+		}
+	}
+	return out;
+}
+
+
+/* 磁盘使用情况（读 cron 生成的缓存 ✓）*/
+function get_disks() {
+	let out = [];
+	let raw = rf('/tmp/sakura_disks.cache') || '';
+	let lines = split(raw, '\n');
+	for (let i = 0; i < length(lines); i++) {
+		let ln = lines[i];
+		if (length(ln) < 5) continue;
+		let p = split(ln, '|');
+		if (length(p) < 6) continue;
+		let total = +p[2], used = +p[3], avail = +p[4];
+		if (total <= 0) continue;
+		push(out, {
+			mount: p[0], dev: p[1],
+			total: total, used: used, avail: avail,
+			pct: (used * 100.0 / total),
+			pct_s: p[5],
+			total_s: fmt_size(total),
+			used_s: fmt_size(used),
+			avail_s: fmt_size(avail)
+		});
+	}
+	return out;
+}
+/* 在线设备（DHCP租约 + ARP表 ✓ 纯读文件 ✗ 不用 popen ✓）*/
+function get_devices() {
+	let out = [];
+	let names = {};
+	let lf = rf('/tmp/dhcp.leases') || '';
+	let lls = split(lf, '\n');
+	for (let i = 0; i < length(lls); i++) {
+		let p = match(lls[i], /^\S+\s+(\S+)\s+(\S+)\s+(\S+)/);
+		if (p && p[3] && p[3] != '*') names[p[1]] = p[3];
+	}
+	let arp = rf('/proc/net/arp') || '';
+	let als = split(arp, '\n');
+	for (let i = 1; i < length(als); i++) {
+		let p = match(als[i], /^(\S+)\s+0x1\s+0x(\S+)\s+(\S+)/);
+		if (!p) continue;
+		let ip = p[1], flags = p[2], mac = p[3];
+		if (mac == '00:00:00:00:00:00' || length(mac) < 11) continue;
+		push(out, {
+			ip: ip, mac: mac,
+			name: names[mac] || '',
+			online: (flags == '2')
+		});
+	}
+	return out;
+}
+
+/* 流量统计（读 cron 累计的缓存 ✓）*/
+function get_traffic() {
+	let c = rf('/tmp/sakura_traffic.cache') || '';
+	let o = {};
+	let ls = split(c, '\n');
+	for (let i = 0; i < length(ls); i++) {
+		let p = match(ls[i], /^([A-Z_]+)=(.*)$/);
+		if (p) o[p[1]] = p[2];
+	}
+	let d_rx = num(o.D_RX), d_tx = num(o.D_TX);
+	let m_rx = num(o.M_RX), m_tx = num(o.M_TX);
+	let t_rx = num(o.T_RX), t_tx = num(o.T_TX);
+	return {
+		ok: length(c) > 0,
+		dev: o.DEV || '',
+		date: o.L_DATE || '',
+		day_rx: d_rx, day_tx: d_tx, day_total: d_rx + d_tx,
+		mon_rx: m_rx, mon_tx: m_tx, mon_total: m_rx + m_tx,
+		tot_rx: t_rx, tot_tx: t_tx, tot_total: t_rx + t_tx,
+		day_rx_s: fmt_size(d_rx / 1024), day_tx_s: fmt_size(d_tx / 1024),
+		day_total_s: fmt_size((d_rx + d_tx) / 1024),
+		mon_rx_s: fmt_size(m_rx / 1024), mon_tx_s: fmt_size(m_tx / 1024),
+		mon_total_s: fmt_size((m_rx + m_tx) / 1024),
+		tot_total_s: fmt_size((t_rx + t_tx) / 1024),
+		upd: o.L_TS ? sprintf('%.0f', time() - num(o.L_TS)) : ''
+	};
+}
+
+function cpu_sample() {
+	let s = rf('/proc/stat');
+	if (!s) return null;
+	let m = match(s, /^cpu\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/);
+	if (!m) return null;
+	return { busy: +m[1] + +m[2] + +m[3], idle: +m[4] };
+}
+
+function get_status() {
+	let out = {};
+	let now = time();
+
+	let c = cpu_sample();
+	let cpu_pct = 0;
+	if (c) {
+		let pc = numlist(rf('/tmp/sakura_cpu.state') || '');
+		if (length(pc) >= 2) {
+			let db = c.busy - pc[0], di = c.idle - pc[1];
+			if (db + di > 0) cpu_pct = db * 100.0 / (db + di);
+		}
+		wf('/tmp/sakura_cpu.state', sprintf('%.0f %.0f', c.busy, c.idle));
+	}
+	let ci = rf('/proc/cpuinfo') || '';
+	let cores = 0, mhz = null;
+	for (let line in split(ci, '\n')) {
+		if (match(line, /^processor\s*:/)) cores++;
+		let mm = match(line, /cpu MHz\s*:\s*([0-9.]+)/);
+		if (mm && !mhz) mhz = +mm[1];
+	}
+	out.cpu_pct = cpu_pct;
+	out.cpu_cores = cores;
+	out.cpu_mhz = mhz;
+
+	let mi = rf('/proc/meminfo') || '';
+	let mtot = num((match(mi, /MemTotal:\s*(\d+)/) || [0, 0])[1]);
+	let mav = num((match(mi, /MemAvailable:\s*(\d+)/) || [0, 0])[1]);
+	if (!mav) mav = num((match(mi, /MemFree:\s*(\d+)/) || [0, 0])[1]);
+	let mused = mtot - mav;
+	out.mem_total = mtot;
+	out.mem_used = mused;
+	out.mem_pct = mtot > 0 ? (mused * 100.0 / mtot) : 0;
+	out.mem_used_s = fmt_size(mused);
+	out.mem_total_s = fmt_size(mtot);
+
+	let temp = null;
+	for (let p in [ '/sys/class/thermal/thermal_zone0/temp', '/sys/class/thermal/thermal_zone1/temp' ]) {
+		let v = num(rf(p));
+		if (v > 1000) { temp = v / 1000; break; }
+	}
+	if (temp == null) {
+		for (let i = 0; i < 12; i++) {
+			let v = num(rf(sprintf('/sys/class/hwmon/hwmon%d/temp1_input', i)));
+			if (v > 1000 && v < 150000) { temp = v / 1000; break; }
+		}
+	}
+	out.temp = temp;
+	out.temp_pct = (temp != null) ? (((temp * 100.0 / 85) > 100) ? 100 : (temp * 100.0 / 85)) : 0;
+	out.temp_s = temp != null ? sprintf('%.0f℃', temp) : '—';
+
+	let nd = rf('/proc/net/dev') || '';
+	let rx = 0, tx = 0;
+	for (let line in split(nd, '\n')) {
+		let m2 = match(line, /^\s*([^:]+):\s*(.+)$/);
+		if (!m2 || m2[1] == 'lo') continue;
+		let ns = numlist(m2[2]);
+		if (length(ns) >= 9) { rx += ns[0]; tx += ns[8]; }
+	}
+	let dl = 0, ul = 0;
+	let pm = numlist(rf('/tmp/sakura_net.state') || '');
+	if (length(pm) >= 3 && pm[0] > 0 && now > pm[0] && (rx - pm[1]) >= 0 && (tx - pm[2]) >= 0) {
+		let dt = now - pm[0];
+		if (dt > 0) { dl = (rx - pm[1]) * 1.0 / dt; ul = (tx - pm[2]) * 1.0 / dt; }
+	}
+	wf('/tmp/sakura_net.state', sprintf('%.0f %.0f %.0f', now, rx, tx));
+
+	let hist = [];
+	let hraw = rf('/tmp/sakura_net.hist');
+	if (hraw) {
+		let hm = numlist(hraw);
+		for (let i = 0; i < length(hm); i++)
+			if (hm[i] >= 0) push(hist, hm[i]);
+	}
+	if (dl != dl) dl = 0;
+	if (ul != ul) ul = 0;
+	push(hist, dl);
+	while (length(hist) > 40) shift(hist);
+	let parts = [];
+	for (let v in hist) push(parts, sprintf('%.3f', v));
+	wf('/tmp/sakura_net.hist', join(' ', parts));
+
+	/* 上传历史（用于双折线 ✓）*/
+	let histu = [];
+	let hrawu = rf('/tmp/sakura_net_ul.hist');
+	if (hrawu) { let hu = numlist(hrawu); for (let i = 0; i < length(hu); i++) if (hu[i] >= 0) push(histu, hu[i]); }
+	push(histu, ul);
+	while (length(histu) > 40) shift(histu);
+	let partsu = [];
+	for (let v in histu) push(partsu, sprintf('%.3f', v));
+	wf('/tmp/sakura_net_ul.hist', join(' ', partsu));
+	out.net_ul_max = 1;
+	for (let v in histu) if (v > out.net_ul_max) out.net_ul_max = v;
+
+	out.net_dl = dl;
+	out.net_ul = ul;
+	out.net_dl_s = fmt_rate(dl);
+	out.net_ul_s = fmt_rate(ul);
+
+	/* 双折线共用同一量程 ✓ */
+	let maxv = 1;
+	for (let v in hist) if (v > maxv) maxv = v;
+	for (let v in histu) if (v > maxv) maxv = v;
+	let n = length(hist);
+	let nu = length(histu);
+	let pts = [], ptsu = [];
+	for (let i = 0; i < n; i++) {
+		let yy = 30 - (hist[i] * 26.0 / maxv);
+		if (yy != yy) yy = 30;
+		push(pts, sprintf('%.1f,%.1f', (n <= 1) ? 0 : (i * 100.0 / (n - 1)), yy));
+	}
+	for (let i = 0; i < nu; i++) {
+		let yy = 30 - (histu[i] * 26.0 / maxv);
+		if (yy != yy) yy = 30;
+		push(ptsu, sprintf('%.1f,%.1f', (nu <= 1) ? 0 : (i * 100.0 / (nu - 1)), yy));
+	}
+	out.poly = join(' ', pts);
+	out.poly_ul = join(' ', ptsu);
+
+	out.hostname = mytrim(rf('/proc/sys/kernel/hostname') || 'OpenWrt');
+	out.model = mytrim(rf('/tmp/sysinfo/model') || 'Generic x86/64');
+	let fwm = match(rf('/etc/openwrt_release') || '', /DISTRIB_DESCRIPTION='([^']+)'/);
+	out.firmware = fwm ? fwm[1] : 'OpenWrt';
+	let up = num((match(rf('/proc/uptime') || '0', /^(\d+)/) || [0, 0])[1]);
+	out.uptime = up;
+	out.uptime_s = sprintf('%d 天 %d 时 %d 分', (up - (up % 86400)) / 86400, ((up % 86400) - (up % 3600)) / 3600, ((up % 3600) - (up % 60)) / 60);
+
+	let ifs = [];
+	try {
+		let conn = ubus_connect();
+		let r = conn.call('network.interface', 'dump');
+		if (r && r.interface) {
+			for (let it in r.interface) {
+				let nm = it.interface || '';
+				let label = null;
+				if (match(nm, /^wan/)) label = 'WAN';
+				else if (match(nm, /^lan/)) label = 'LAN';
+				else if (match(nm, /^(wlan|wwan|ra\d)/)) label = 'WLAN';
+				else if (match(nm, /(wg|vpn|tun)/)) label = 'VPN';
+				let v4 = null, v6 = null, gw = null, dnss = [];
+				let a4 = it['ipv4-address'];
+				if (a4 && length(a4) > 0) {
+					let a0 = a4[0];
+					if (a0 && a0.address) {
+						v4 = '' + a0.address;
+						if (a0.mask != null) v4 = sprintf('%s/%d', v4, a0.mask);
+					}
+				}
+				let a6 = it['ipv6-address'];
+				if (a6) {
+					for (let i = 0; i < length(a6); i++) {
+						let ad = (a6[i] && a6[i].address) ? ('' + a6[i].address) : '';
+						if (length(ad) > 0 && !match(ad, /^fe80/)) { v6 = ad; break; }
+					}
+				}
+				let rts = it.route;
+				if (rts) {
+					for (let i = 0; i < length(rts); i++) {
+						if (rts[i] && rts[i].nexthop && gw == null) gw = '' + rts[i].nexthop;
+					}
+				}
+				let ds = it['dns-server'];
+				if (ds) {
+					for (let i = 0; i < length(ds); i++) {
+						if (ds[i] && !match('' + ds[i], /^(127\.|::1$)/)) push(dnss, '' + ds[i]);
+					}
+				}
+				push(ifs, { name: nm, label: label, up: it.up === true, proto: it.proto || '',
+					v4: v4, v6: v6, gw: gw, dns: dnss, uptime: (it.uptime || 0) });
+			}
+		}
+		if (conn) conn.disconnect();
+	} catch (e) { }
+	out.interfaces = ifs;
+
+	/* 网络连接信息（WAN 优先 ✓）*/
+	let wan = null;
+	for (let i = 0; i < length(ifs); i++) {
+		if (ifs[i].label == 'WAN' && ifs[i].up) { wan = ifs[i]; break; }
+	}
+	if (wan == null) {
+		for (let i = 0; i < length(ifs); i++) {
+			if (ifs[i].up && ifs[i].v4) { wan = ifs[i]; break; }
+		}
+	}
+	out.wan4 = wan ? (wan.v4 || '') : '';
+	out.wan6 = wan ? (wan.v6 || '') : '';
+	out.wan_gw = wan ? (wan.gw || '') : '';
+	let dnsall = [];
+	if (wan && wan.dns) {
+		for (let i = 0; i < length(wan.dns); i++) push(dnsall, wan.dns[i]);
+	}
+	if (length(dnsall) == 0) {
+		let rc = rf('/tmp/resolv.conf.d/resolv.conf.auto') || rf('/etc/resolv.conf') || '';
+		let lines = split(rc, '\n');
+		for (let i = 0; i < length(lines); i++) {
+			let m = match(lines[i], /^nameserver\s+(\S+)/);
+			if (m && length(m) > 1 && !match(m[1], /^(127\.|::1$)/)) push(dnsall, m[1]);
+		}
+	}
+	out.wan_dns = join(' / ', dnsall);
+	out.wan_if = wan ? (wan.label || wan.name) : '';
+
+	/* 公网 IP（逐行解析天气缓存 ✓ 避免复杂正则 ✗）*/
+	let wc = rf('/tmp/sakura_weather.cache') || '';
+	let wo = {};
+	let wlines = split(wc, '\n');
+	for (let i = 0; i < length(wlines); i++) {
+		let p = match(wlines[i], /^([a-z_]+)=(.*)$/);
+		if (p) wo[p[1]] = p[2];
+	}
+	out.pub_ip = wo.ip || '';
+	out.pub_loc = (wo.region || '') + ((wo.region && wo.city) ? ' · ' : '') + (wo.city || '');
+
+	out.disks = get_disks();
+	out.devices = get_devices();
+	let dt = get_dev_traffic();
+	for (let i = 0; i < length(out.devices); i++) {
+		let d = out.devices[i];
+		for (let j = 0; j < length(dt); j++) {
+			if (dt[j].ip == d.ip) {
+				d.rx_s = dt[j].rx_s; d.tx_s = dt[j].tx_s; d.total_s = dt[j].total_s;
+				d.rx = dt[j].rx; d.tx = dt[j].tx;
+				break;
+			}
+		}
+	}
+	out.dev_traffic = dt;
+	out.traffic = get_traffic();
+
+	/* 连接时长（WAN 的 uptime ✓）*/
+	let wup = 0;
+	if (wan && wan.uptime) wup = +wan.uptime;
+	out.wan_uptime_s = sprintf('%d天%d小时%d分%d秒',
+		(wup - (wup % 86400)) / 86400,
+		((wup % 86400) - (wup % 3600)) / 3600,
+		((wup % 3600) - (wup % 60)) / 60,
+		wup % 60);
+	out.wan_ok = (wan != null);
+	out.wan_proto = wan ? (wan.proto || '') : '';
+	out.dns_auto = false;
+	out.wan6_on = false;
+	for (let i = 0; i < length(ifs); i++) {
+		if (match(ifs[i].name, /^wan6/) || (ifs[i].label == 'WAN' && length(ifs[i].v6 || '') > 0)) out.wan6_on = true;
+	}
+
+	/* 物理网口（含速率 + 归属接口 ✓）*/
+	let devmap = {};
+	try {
+		let uc = uci_cursor();
+		uc.foreach('network', 'interface', (s) => {
+			let dev = s.ifname || s.device || '';
+			let nm = s['.name'] || '';
+			if (length(dev) == 0) return;
+			for (let d in split(dev, ' ')) {
+				if (length(d) == 0) continue;
+				if (!devmap[d]) devmap[d] = [];
+				let lab = upper(nm);
+				push(devmap[d], lab);
+			}
+		});
+	} catch (e) { }
+
+	let ports = [];
+	/* 从 /proc/net/dev 取设备名（纯文件读 ✓ 不用 popen ✗）*/
+	let devlist = [];
+	let nd2 = rf('/proc/net/dev') || '';
+	let ndlines = split(nd2, '\n');
+	for (let i = 0; i < length(ndlines); i++) {
+		let m = match(ndlines[i], /^\s*([^:]+):/);
+		if (m && length(m) > 1) push(devlist, trim(m[1]));
+	}
+	for (let i = 0; i < length(devlist); i++) {
+		let d = trim(devlist[i]);
+		if (length(d) == 0) continue;
+		if (match(d, /^(lo|docker|br-|veth|sit|teql|dummy|dheth|wg|tun|ifb|phy|mon)/)) continue;
+		if (match(d, /[.@]/)) continue;
+		let carrier = trim(rf(sprintf('/sys/class/net/%s/carrier', d)) || '0');
+		let oper = trim(rf(sprintf('/sys/class/net/%s/operstate', d)) || '');
+		let spd = trim(rf(sprintf('/sys/class/net/%s/speed', d)) || '');
+		let up = (carrier == '1') || (oper == 'up');
+		let spd_s = '';
+		if (up && length(spd) > 0 && +spd > 0) spd_s = sprintf('%d Mbit/s', +spd);
+		let roles = devmap[d] ? join(',', devmap[d]) : '';
+		push(ports, { name: d, roles: roles, up: up, speed: spd_s, oper: oper });
+	}
+	out.ports = ports;
+
+	return out;
+}
+
+
+
+
+/* 天气：读缓存 + 后台刷新（不阻塞 ✓）*/
+function get_weather() {
+	let c = rf('/tmp/sakura_weather.cache') || '';
+	let o = {};
+	for (let ln in split(c, '\n')) {
+		let p = match(ln, /^([a-z_]+)=(.*)$/);
+		if (p) o[p[1]] = p[2];
+	}
+	let now = time();
+	let stale = true;
+	if (o.ts && (now - +o.ts) < 900 && length(o.city) > 0) stale = false;
+	if (stale) {
+		/* 通过 ubus 触发 shell 版刷新器 ✓（ucode 的 popen 被沙箱禁 ✗）*/
+		try {
+			let uc = ubus_connect();
+			uc.call('luci.sakura_fetch', 'refresh', {});
+			uc.disconnect();
+		} catch (e) { }
+	}
+	if (length(o.city) > 0) {
+		o.ok = true;
+		o.age = o.ts ? (now - +o.ts) : -1;
+		return o;
+	}
+	return { ok: false, city: '', temp: '—', desc: '正在获取…', icon: '⏳', age: 0 };
+}
+let cmd = '';
+for (let i = 0; i < length(ARGV); i++) {
+	let a = ARGV[i];
+	if (a == 'list' || a == 'status' || a == 'weather') { cmd = a; break; }
+}
+
+let result = null;
+if (cmd == 'list') result = { status: { }, weather: { } };
+else if (cmd == 'status') result = get_status();
+else if (cmd == 'weather') result = get_weather();
+else result = { error: 'unknown method' };
+
+if (result != null) print(sprintf('%.J', result));

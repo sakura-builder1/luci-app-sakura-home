@@ -1,0 +1,85 @@
+#!/bin/sh
+# 樱花首页 - Docker 容器控制 + 状态（shell 版 rpcd ✓）
+. /usr/share/libubox/jshn.sh
+
+do_status() {
+	json_init
+
+	if /etc/init.d/dockerd running >/dev/null 2>&1; then
+		json_add_boolean service 1
+	else
+		json_add_boolean service 0
+	fi
+
+	# 用临时文件避免管道子shell ✗（jshn 的改动会丢 ✓）
+	TMP=/tmp/.sakura_dk_list
+	/usr/bin/docker ps -a --format '{{.Names}}@@{{.State}}@@{{.Status}}@@{{.Image}}@@{{.Ports}}@@{{.Mounts}}@@{{.Networks}}' > "$TMP" 2>/dev/null
+
+	json_add_array containers
+	while IFS= read -r LINE; do
+		[ -z "$LINE" ] && continue
+		n=$(echo "$LINE" | awk -F'@@' '{print $1}')
+		s=$(echo "$LINE" | awk -F'@@' '{print $2}')
+		t=$(echo "$LINE" | awk -F'@@' '{print $3}')
+		i=$(echo "$LINE" | awk -F'@@' '{print $4}')
+		p=$(echo "$LINE" | awk -F'@@' '{print $5}')
+		m=$(echo "$LINE" | awk -F'@@' '{print $6}')
+		w=$(echo "$LINE" | awk -F'@@' '{print $7}')
+		[ -z "$n" ] && continue
+		json_add_object
+		json_add_string name "$n"
+		json_add_string state "$s"
+		json_add_string status "$t"
+		json_add_string image "$i"
+		json_add_string ports "$p"
+		json_add_string mounts "$m"
+		json_add_string nets "$w"
+		json_close_object
+	done < "$TMP"
+	json_close_array
+	rm -f "$TMP"
+
+	json_add_boolean result 1
+	json_dump
+	json_cleanup
+	exit 0
+}
+
+do_ctl() {
+	read -r INPUT
+	json_load "$INPUT"
+	json_get_var name name
+	json_get_var action action
+
+	case "$action" in
+		start|stop|restart|pause|unpause|kill) ;;
+		*) json_init; json_add_boolean result 0; json_add_string msg "bad action"; json_dump; json_cleanup; exit 0 ;;
+	esac
+	case "$name" in
+		""|*[!A-Za-z0-9_.-]*) json_init; json_add_boolean result 0; json_add_string msg "bad name"; json_dump; json_cleanup; exit 0 ;;
+	esac
+
+	OUT=$(/usr/bin/docker "$action" "$name" 2>&1)
+	RC=$?
+	json_init
+	if [ $RC -eq 0 ]; then json_add_boolean result 1; else json_add_boolean result 0; fi
+	json_add_string msg "$OUT"
+	json_dump
+	json_cleanup
+	exit 0
+}
+
+case "$1" in
+	list)
+		echo '{ "status": { }, "ctl": { "name": "string", "action": "string" } }'
+		exit 0
+		;;
+	call)
+		case "$2" in
+			status) do_status ;;
+			ctl)    do_ctl ;;
+		esac
+		;;
+esac
+
+exit 0

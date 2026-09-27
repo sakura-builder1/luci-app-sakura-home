@@ -1,0 +1,20 @@
+#!/bin/sh
+# 樱花首页：安装 cron 任务 + 配置 nlbwmon（按日分设备流量统计 ✓）
+CRON="/etc/crontabs/root"
+[ -f "$CRON" ] || touch "$CRON"
+grep -q 'sakura-weather-fetch' "$CRON" 2>/dev/null || \
+	echo '* * * * * /usr/bin/sakura-weather-fetch' >> "$CRON"
+
+# nlbwmon：缩短落盘间隔（默认 24h 太长 ✗ 数据读不到 ✓）
+if [ -f /etc/config/nlbwmon ]; then
+	uci -q get nlbwmon.@nlbwmon[0] >/dev/null 2>&1 || uci -q add nlbwmon nlbwmon
+	uci -q set nlbwmon.@nlbwmon[0].commit_interval='5m'
+	uci -q set nlbwmon.@nlbwmon[0].refresh_interval='30s'
+	uci -q commit nlbwmon
+	/etc/init.d/nlbwmon enable 2>/dev/null
+	/etc/init.d/nlbwmon restart 2>/dev/null
+fi
+
+/etc/init.d/cron enable 2>/dev/null
+/etc/init.d/cron restart 2>/dev/null
+exit 0
