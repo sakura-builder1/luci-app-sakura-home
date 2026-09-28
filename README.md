@@ -49,12 +49,24 @@ LuCI ---> Applications ---> <*> luci-app-sakura-home
 
 ## 🔧 依赖
 
+### 必需（已写入 Makefile ✓ 安装时自动拉取）
+
 | 包 | 用途 |
 |---|---|
-| `luci-theme-sakura` | 主题联动 |
-| `jsonfilter` | 天气脚本解析 JSON |
-| `ucode` | rpcd 后端 |
-| `nlbwmon`（可选）| 按设备流量统计 |
+| `luci-theme-sakura` | 主题联动（主色调/透明度/模糊半径跟随）|
+| `jsonfilter` | 天气/磁盘脚本解析 JSON |
+| `ucode` | rpcd 数据后端 |
+| `uclient-fetch` | 天气脚本联网抓取（`wget` 兼容）|
+
+### 可选（不装也能用，对应功能自动降级）
+
+| 包 | 用途 | 不装的后果 |
+|---|---|---|
+| `nlbwmon` | **按设备**流量统计（今日累计）| 自动降级为 conntrack 快照（非累计）|
+| `docker` / `dockerd` | Docker 容器卡片 | 该卡片显示「Docker 服务未运行」|
+| `luci-app-dlna-player` | 与 DLNA 音乐播放器配合 | 不影响本插件 |
+
+> 💡 基础命令（`awk` / `sed` / `df` / `cron` / `jshn`）都在 OpenWrt 基础系统中，无需额外声明。
 
 ---
 
