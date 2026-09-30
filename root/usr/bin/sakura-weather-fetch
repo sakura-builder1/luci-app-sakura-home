@@ -1,5 +1,18 @@
 #!/bin/sh
 # 樱花首页数据抓取（cron 每分钟跑 ✓ 天气自限流 ✓）
+# ---------- 下载器兼容（优先 uclient-fetch 回退 wget）+ URL 编码 ----------
+DL=""
+for c in uclient-fetch wget; do
+	command -v "$c" >/dev/null 2>&1 && { DL="$c"; break; }
+done
+[ -n "$DL" ] || DL=wget
+
+# 中文参数必须百分号编码（uclient-fetch 不支持原样传中文）
+# busybox 没有 od/xxd，改用 ucode（本插件必装依赖）
+urlencode() {
+	ucode -e 'let s=ARGV[0]||""; let o=""; for(let i=0;i<length(s);i++){let c=ord(s,i); if((c>=48&&c<=57)||(c>=65&&c<=90)||(c>=97&&c<=122)||c==45||c==46||c==95||c==126) o+=chr(c); else o+=sprintf("%%%02X",c);} print(o);' "$1" 2>/dev/null
+}
+
 C=/tmp/sakura_weather.cache
 TMP=/tmp/sakura_weather.tmp
 DC=/tmp/sakura_disks.cache
@@ -89,7 +102,7 @@ OLD=0
 [ -z "$OLD" ] && OLD=0
 [ $((NOW - OLD)) -lt 900 ] && exit 0
 
-J=$(wget -qO- --timeout=12 'https://ip.zxinc.org/api.php?type=json' 2>/dev/null)
+J=$("$DL" -qO- --timeout=12 'https://ip.zxinc.org/api.php?type=json' 2>/dev/null)
 [ -z "$J" ] && exit 1
 LOC=$(printf '%s' "$J" | jsonfilter -e '@.data.country' 2>/dev/null)
 IPX=$(printf '%s' "$J" | jsonfilter -e '@.data.myip' 2>/dev/null)
@@ -98,12 +111,12 @@ PROV=$(printf '%s' "$LOC" | sed 's/^[^–]*–//; s/–.*$//')
 CITY=$(printf '%s' "$LOC" | sed 's/.*–//')
 [ -z "$CITY" ] && CITY="$LOC"
 
-G=$(wget -qO- --timeout=12 "https://geocoding-api.open-meteo.com/v1/search?name=$CITY&count=1&language=zh&format=json" 2>/dev/null)
+G=$("$DL" -qO- --timeout=12 "https://geocoding-api.open-meteo.com/v1/search?name=$(urlencode "$CITY")&count=1&language=zh&format=json" 2>/dev/null)
 LAT=$(printf '%s' "$G" | jsonfilter -e '@.results[0].latitude' 2>/dev/null)
 LON=$(printf '%s' "$G" | jsonfilter -e '@.results[0].longitude' 2>/dev/null)
 [ -z "$LAT" ] && exit 1
 
-W=$(wget -qO- --timeout=12 "https://api.open-meteo.com/v1/forecast?latitude=$LAT&longitude=$LON&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,is_day&daily=temperature_2m_max,temperature_2m_min&forecast_days=1&timezone=Asia%2FShanghai" 2>/dev/null)
+W=$("$DL" -qO- --timeout=12 "https://api.open-meteo.com/v1/forecast?latitude=$LAT&longitude=$LON&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,is_day&daily=temperature_2m_max,temperature_2m_min&forecast_days=1&timezone=Asia%2FShanghai" 2>/dev/null)
 [ -z "$W" ] && exit 1
 
 TEMP=$(printf '%s' "$W" | jsonfilter -e '@.current.temperature_2m')

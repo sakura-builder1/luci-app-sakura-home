@@ -186,11 +186,26 @@ function get_status() {
 	let cpu_pct = 0;
 	if (c) {
 		let pc = numlist(rf('/tmp/sakura_cpu.state') || '');
-		if (length(pc) >= 2) {
+		let pt = numlist(rf('/tmp/sakura_cpu.time') || '');
+		let last_t = (length(pt) >= 1) ? +pt[0] : 0;
+		/* ★ 采样间隔必须 >= 2 秒，否则算出来是垃圾值（比如间隔几毫秒会出现 1/7=14.29%）
+		   间隔不够时，沿用上一次的计算结果 */
+		if (length(pc) >= 2 && last_t > 0 && (now - last_t) >= 2) {
 			let db = c.busy - pc[0], di = c.idle - pc[1];
-			if (db + di > 0) cpu_pct = db * 100.0 / (db + di);
+			if (db + di > 0) {
+				cpu_pct = db * 100.0 / (db + di);
+				wf('/tmp/sakura_cpu.state', sprintf('%.0f %.0f', c.busy, c.idle));
+				wf('/tmp/sakura_cpu.time', sprintf('%d', now));
+				wf('/tmp/sakura_cpu.last', sprintf('%.2f', cpu_pct));
+			}
+		} else {
+			let lp = numlist(rf('/tmp/sakura_cpu.last') || '');
+			if (length(lp) >= 1) cpu_pct = lp[0];
+			if (last_t == 0) {
+				wf('/tmp/sakura_cpu.state', sprintf('%.0f %.0f', c.busy, c.idle));
+				wf('/tmp/sakura_cpu.time', sprintf('%d', now));
+			}
 		}
-		wf('/tmp/sakura_cpu.state', sprintf('%.0f %.0f', c.busy, c.idle));
 	}
 	let ci = rf('/proc/cpuinfo') || '';
 	let cores = 0, mhz = null;
@@ -416,7 +431,15 @@ function get_status() {
 		((wup % 86400) - (wup % 3600)) / 3600,
 		((wup % 3600) - (wup % 60)) / 60,
 		wup % 60);
-	out.wan_ok = (wan != null);
+	/* 网络是否真的可用：接口 up + 有默认网关 + 有 DNS，三者缺一不可 */
+	let why = [];
+	if (wan == null) push(why, '接口未连接');
+	else {
+		if (length(out.wan_gw) == 0) push(why, '未获取到网关');
+		if (length(dnsall) == 0) push(why, '未获取到 DNS');
+	}
+	out.wan_ok = (wan != null) && length(out.wan_gw) > 0 && length(dnsall) > 0;
+	out.net_reason = join(' · ', why);
 	out.wan_proto = wan ? (wan.proto || '') : '';
 	out.dns_auto = false;
 	out.wan6_on = false;

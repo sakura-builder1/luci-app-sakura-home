@@ -587,7 +587,8 @@ function netInfoCard(s) {
 
 	var ok = (s.wan_ok === true);
 	var head = E('div', { 'class': 'nhead' }, [
-		E('span', { 'class': 'stat ' + (ok ? 'on' : 'off') }, [ ok ? '✓ 网络连接正常' : '✗ 网络连接异常' ]),
+		E('span', { 'class': 'stat ' + (ok ? 'on' : 'off') }, [ ok ? '✓ 网络连接正常'
+			: ('✗ ' + (s.net_reason && String(s.net_reason).length ? String(s.net_reason) : '网络连接异常')) ]),
 		E('span', { 'class': 'up' }, [ s.wan_uptime_s || '—' ])
 	]);
 
