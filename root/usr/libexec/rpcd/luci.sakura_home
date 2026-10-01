@@ -244,11 +244,30 @@ function get_status() {
 	out.temp_pct = (temp != null) ? (((temp * 100.0 / 85) > 100) ? 100 : (temp * 100.0 / 85)) : 0;
 	out.temp_s = temp != null ? sprintf('%.0f℃', temp) : '—';
 
+	/* ★ 实时网速：只统计 WAN 接口，绝不能把所有接口相加
+	   为什么：下载时同一份数据会在 WAN 上算一次 RX，
+	   又在 LAN 物理口和 br-lan 桥接层各算一次 TX，
+	   相加会让"上传"虚高 2 倍，看起来上传比下载还快。
+	   只读 WAN：RX = 下载，TX = 上传，方向才正确。 */
+	let wanDev = '';
+	let wc0 = rf('/tmp/sakura_traffic.cache') || '';
+	let wm0 = match(wc0, /(^|\n)DEV=(\S+)/);      /* ucode 不支持 (?: 非捕获组，用捕获组 */
+	if (wm0) wanDev = wm0[2];
+	if (!wanDev) {
+		/* 兜底：从默认路由找出口接口 ✓ 不依赖脚本写缓存 */
+		let rtb = rf('/proc/net/route') || '';
+		for (let line in split(rtb, '\n')) {
+			let rm = match(line, /^(\S+)\s+00000000/);
+			if (rm) { wanDev = rm[1]; break; }
+		}
+	}
 	let nd = rf('/proc/net/dev') || '';
 	let rx = 0, tx = 0;
 	for (let line in split(nd, '\n')) {
 		let m2 = match(line, /^\s*([^:]+):\s*(.+)$/);
-		if (!m2 || m2[1] == 'lo') continue;
+		if (!m2) continue;
+		let nm2 = mytrim(m2[1]);
+		if (wanDev ? (nm2 != wanDev) : /^(lo|br-|docker|veth|tun|tap|wlan|6in4|sit|bond)/.test(nm2)) continue;
 		let ns = numlist(m2[2]);
 		if (length(ns) >= 9) { rx += ns[0]; tx += ns[8]; }
 	}
@@ -379,7 +398,21 @@ function get_status() {
 		}
 	}
 	out.wan4 = wan ? (wan.v4 || '') : '';
-	out.wan6 = wan ? (wan.v6 || '') : '';
+	/* ★ WAN 的 IPv6 地址：不能跟着 wan 走
+	   坑：wan 和 wan6 都满足 /^wan/，label 都是 'WAN'，
+	   而循环里先找到的是 IPv4 的 wan —— 它的 ipv6-address 是空数组，
+	   所以 out.wan6 恒为空，卡片就显示"未启用"（但徽章用 wan6_on 又是"已启用"）。
+	   正确做法：在所有 up 且带【公网级】IPv6 的 WAN 接口里挑。 */
+	let wan6 = '';
+	for (let i = 0; i < length(ifs); i++) {
+		if (!ifs[i].up) continue;
+		let v6v = ifs[i].v6 || '';
+		if (length(v6v) == 0) continue;
+		if (match(v6v, /^fe80/i)) continue;      /* 链路本地 */
+		if (match(v6v, /^f[cd]/i)) continue;     /* ULA（内网地址，不是公网）*/
+		if (ifs[i].label == 'WAN' || match(ifs[i].name, /^wan/)) { wan6 = v6v; break; }
+	}
+	out.wan6 = wan6;
 	out.wan_gw = wan ? (wan.gw || '') : '';
 	let dnsall = [];
 	if (wan && wan.dns) {
@@ -416,6 +449,7 @@ function get_status() {
 			if (dt[j].ip == d.ip) {
 				d.rx_s = dt[j].rx_s; d.tx_s = dt[j].tx_s; d.total_s = dt[j].total_s;
 				d.rx = dt[j].rx; d.tx = dt[j].tx;
+				d.src = dt[j].src;      /* ★ 带上来源标记，前端据此显示"今日累计" */
 				break;
 			}
 		}
