@@ -1,0 +1,52 @@
+#!/bin/sh
+# 樱花首页 · bandix 流量取数脚本
+# ---------------------------------------------------------------
+# 作用：从 bandix 本地 API 拉取「每设备逐天流量」，存成原始 JSON，
+#       供 ucode 后端（无法 popen）读取并汇总成 日/周/月。
+# 产出：/tmp/sakura_bandix/
+#   devices.json          设备列表（原始响应）
+#   wan_<mac>.json        该设备近 N 天 WAN 逐天数据
+#   lan_<mac>.json        该设备近 N 天 LAN 逐天数据
+#   ts                    本次更新时间戳
+# 由 cron 每分钟调用。
+
+API="http://127.0.0.1:8686"
+DIR="/tmp/sakura_bandix"
+DAYS=30
+
+mkdir -p "$DIR" 2>/dev/null
+
+NOW_S=$(date +%s)
+NOW_MS=$((NOW_S * 1000))
+TZ_OFF=28800   # UTC+8（东八区）
+TODAY_MS=$(( ((NOW_S + TZ_OFF) / 86400 * 86400 - TZ_OFF) * 1000 ))
+WEEK_MS=$(( (NOW_S - 7  * 86400) * 1000 ))
+MONTH_MS=$(( (NOW_S - DAYS * 86400) * 1000 ))
+
+# 1) 设备列表
+DEV=$(curl -s -m 6 "$API/api/traffic/devices" 2>/dev/null)
+[ -z "$DEV" ] && exit 1
+printf '%s' "$DEV" > "$DIR/devices.json"
+
+# 2) 逐设备拉取近 N 天逐天数据（WAN + LAN）
+MACS=$(printf '%s' "$DEV" | jsonfilter -e '@.data.d[*].mac' 2>/dev/null)
+for m in $MACS; do
+	[ -z "$m" ] && continue
+	curl -s -m 6 "$API/api/traffic/usage/increments?aggregation=daily&network_type=wan&start_ms=$MONTH_MS&end_ms=$NOW_MS&mac=$m" \
+		> "$DIR/wan_$m.json" 2>/dev/null
+	curl -s -m 6 "$API/api/traffic/usage/increments?aggregation=daily&network_type=lan&start_ms=$MONTH_MS&end_ms=$NOW_MS&mac=$m" \
+		> "$DIR/lan_$m.json" 2>/dev/null
+done
+
+date +%s > "$DIR/ts"
+
+# 3) 清理过期设备文件（设备可能已下线）
+for f in "$DIR"/wan_*.json "$DIR"/lan_*.json; do
+	[ -f "$f" ] || continue
+	base=$(basename "$f"); mac=${base#wan_}; mac=${mac#lan_}; mac=${mac%.json}
+	keep=0
+	for m in $MACS; do [ "$m" = "$mac" ] && keep=1 && break; done
+	[ "$keep" = "0" ] && rm -f "$f"
+done
+
+exit 0

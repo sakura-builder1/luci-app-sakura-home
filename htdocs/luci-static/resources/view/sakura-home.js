@@ -52,12 +52,19 @@ var STYLE = [
 '.svc-st.stop{background:rgba(200,180,190,.22);color:var(--text-color-low,currentColor)}',
 '.dk-svc{margin-left:auto;display:flex;align-items:center;gap:.4rem;font-weight:400;font-size:.78rem}',
 '.sk-dkb{padding:.35rem 0;border-bottom:1px solid var(--border-color-low,rgba(0,0,0,.05))}',
-'.sk-dkd{display:flex;flex-wrap:wrap;gap:.15rem .9rem;padding:.15rem 0 0 .1rem;font-size:.73rem;color:var(--text-color-low,currentColor)}',
-'.sk-dkd .di{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}',
+'.sk-dkd{display:flex;flex-wrap:wrap;gap:.3rem .45rem;padding:.3rem 0 0 .1rem;font-size:.72rem;color:var(--text-color-low,currentColor)}',
+/* ★ 长内容（端口/挂载）不再铺开撑破卡片：默认只显示标签，悬停 tooltip 看全部 ✓ */
+'.sk-dkd .di{white-space:nowrap;cursor:help;padding:.05rem .5rem;border-radius:999px;background:rgba(120,90,110,.07);border:1px dashed rgba(120,90,110,.3);opacity:.92;transition:background .15s,border-color .15s,color .15s}',
+'.sk-dkd .di:hover{background:rgba(107,46,74,.13);border-color:#6B2E4A;color:#6B2E4A;opacity:1}',
+/* ★ 自定义悬浮提示：立即出现，且不受 .sk-dklist 的 overflow 裁切 ✓ */
+'.sk-tip{position:fixed;z-index:99999;display:none;max-width:min(72vw,560px);padding:.45rem .62rem;border-radius:9px;background:rgba(45,30,38,.96);color:#fff;font-size:.72rem;line-height:1.5;white-space:pre-wrap;word-break:break-all;box-shadow:0 6px 20px rgba(0,0,0,.32);pointer-events:none}',
 '.sk-dk{display:flex;align-items:center;gap:.5rem;font-size:.83rem}',
-'.sk-dklist{overflow-y:auto;flex:1 1 auto;margin-top:.2rem;scrollbar-width:thin}',
-'.sk-dklist::-webkit-scrollbar{width:6px}',
-'.sk-dklist::-webkit-scrollbar-thumb{background:rgba(120,90,110,.25);border-radius:3px}',
+'.sk-dklist{overflow-y:auto;flex:1 1 auto;margin-top:.2rem;scrollbar-width:thin;scrollbar-color:rgba(160,120,145,.3) transparent}',
+/* 与在线设备、流量列表及主题侧边栏统一：极细 + 透明轨道 ✓ */
+'.sk-dklist::-webkit-scrollbar{width:5px;height:1px}',
+'.sk-dklist::-webkit-scrollbar-track{background:transparent}',
+'.sk-dklist::-webkit-scrollbar-thumb{background:rgba(160,120,145,.26);border-radius:99px}',
+'.sk-dklist::-webkit-scrollbar-thumb:hover{background:rgba(160,120,145,.44)}',
 '.sk-dk{display:flex;align-items:center;gap:.5rem;padding:.35rem .1rem;font-size:.83rem;border-bottom:1px solid var(--border-color-low,rgba(0,0,0,.05))}',
 '.sk-dk .nm{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text-color-high,#2B2430);font-weight:600}',
 '.sk-dk .st{flex:0 0 auto;font-size:.74rem;padding:1px 8px;border-radius:99px;white-space:nowrap}',
@@ -101,6 +108,8 @@ var STYLE = [
 '.sk-bar>i{display:block;height:100%;border-radius:99px;background:var(--primary,var(--primary-color-medium,var(--main-color,currentColor)));transition:width .4s}',
 '.sk-sub{margin-top:.55rem;font-size:.8rem;color:var(--text-color-low,var(--text-color-medium,currentColor));opacity:.78}',
 '.sk-sub b{color:#6B2E4A}',
+'.sk-empty{text-align:center;padding:1.5rem .4rem}',
+'.sk-empty-t{font-size:.92rem;font-weight:600;color:#6B2E4A;opacity:.88}',
 '.nhead{display:flex;justify-content:space-between;align-items:center;font-size:.88rem;margin:.2rem 0 .55rem}',
 '.nhead .stat.on{color:#2FB89E;font-weight:600}',
 '.nhead .stat.off{color:#E84545;font-weight:600}',
@@ -133,9 +142,16 @@ var STYLE = [
 '.sk-row .st.off{color:#C9B7C0}',
 '.sk-rhead .sk-up,.sk-row .sk-up{color:#E84545}',
 '.sk-rhead .sk-dn,.sk-row .sk-dn{color:#2E86DE}',
-'.sk-devlist{overflow-y:auto;flex:1 1 auto;margin-top:.2rem;padding-right:4px;scrollbar-width:thin}',
-'.sk-devlist::-webkit-scrollbar{width:5px}',
-'.sk-devlist::-webkit-scrollbar-thumb{background:rgba(120,90,110,.22);border-radius:3px}',
+/* ★ 列表最多可见 10 行，超出内部滚动（固定行高 → 可视行数精确可控）✓
+   表头移出滚动区：滚动时永远可见，且无需底色遮挡（不破坏卡片渐变背景）✓ */
+'.sk-devlist{overflow-y:auto;flex:1 1 auto;margin-top:.2rem;padding-right:4px;scrollbar-width:thin;scrollbar-color:rgba(160,120,145,.3) transparent;max-height:calc(10 * 1.95rem)}',
+'.sk-devlist .sk-row{box-sizing:border-box;height:1.95rem;padding:.32rem 0}',
+'.sk-hint{margin-left:.4rem;font-size:.7rem;font-weight:400;color:var(--text-color-low,currentColor);opacity:.6}',
+/* ★ 滚动条对齐主题侧边栏 .main-left：极细(5px) + 透明轨道（不再有突兀的灰条）✓ */
+'.sk-devlist::-webkit-scrollbar{width:5px;height:1px}',
+'.sk-devlist::-webkit-scrollbar-track{background:transparent}',
+'.sk-devlist::-webkit-scrollbar-thumb{background:rgba(160,120,145,.26);border-radius:99px}',
+'.sk-devlist::-webkit-scrollbar-thumb:hover{background:rgba(160,120,145,.44)}',
 '.sk-dev{display:flex;align-items:center;gap:.5rem;padding:.3rem 0;font-size:.83rem}',
 '.sk-dev .dn{color:var(--text-color-high,#2B2430);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1 1 auto}',
 '.sk-dev .di{color:var(--text-color-low,currentColor);font-size:.76rem;white-space:nowrap}',
@@ -145,6 +161,9 @@ var STYLE = [
 '.sk-tv .tv{color:var(--text-color-high,#2B2430);font-weight:700}',
 '.sk-tv .tu{color:#E84545}',
 '.sk-tv .td{color:#2E86DE}',
+'.sk-seg{display:inline-flex;gap:.22rem;margin-left:.6rem;vertical-align:middle}',
+'.sk-seg button{background:rgba(255,255,255,.55);border:1px solid var(--border-color-low,rgba(0,0,0,.1));border-radius:99px;padding:.05rem .52rem;font-size:.72rem;line-height:1.5;cursor:pointer;color:var(--text-color-low,currentColor);transition:all .18s}',
+'.sk-seg button.on{background:#F2A6C0;border-color:#F2A6C0;color:#fff;font-weight:600}',
 '.sk-netsep{height:1px;background:var(--border-color-low,rgba(0,0,0,.08));margin:.5rem 0}',
 '.sk-kv .r{display:flex;justify-content:space-between;align-items:center;padding:.3rem 0;font-size:.85rem;gap:.8rem}',
 '.sk-kv .k{color:var(--text-color-low,var(--text-color-medium,currentColor));opacity:.75;white-space:nowrap}',
@@ -400,13 +419,30 @@ function devName(d) {
 	return d.ip;
 }
 
+/* ★ 设备顺序保持稳定：老设备留在原位置，新加入的设备追加到末尾 ✓
+   不再每次按「在线状态 / IP」重排 —— 否则某台设备一上线，整张表就乱跳 ✓ */
+function devKey(d) { return d.mac || d.ip || devName(d); }
+function stableDevList(ds) {
+	if (!window.__sk_devOrd) window.__sk_devOrd = [];
+	var cur = {}, i, k;
+	for (i = 0; i < ds.length; i++) cur[devKey(ds[i])] = ds[i];
+	var out = [], used = {};
+	for (i = 0; i < window.__sk_devOrd.length; i++) {
+		k = window.__sk_devOrd[i];
+		if (cur[k] && !used[k]) { out.push(cur[k]); used[k] = 1; }
+	}
+	for (i = 0; i < ds.length; i++) {
+		k = devKey(ds[i]);
+		if (!used[k]) { out.push(ds[i]); used[k] = 1; }
+	}
+	var ord = [];
+	for (i = 0; i < out.length; i++) ord.push(devKey(out[i]));
+	window.__sk_devOrd = ord;
+	return out;
+}
+
 function devicesCard(s) {
-	var ds = (s && s.devices) ? s.devices.slice() : [];
-	/* 在线优先 + 按 IP 排序 ✓ */
-	ds.sort(function (a, b) {
-		if (!!b.online !== !!a.online) return b.online ? 1 : -1;
-		return String(a.ip).localeCompare(String(b.ip));
-	});
+	var ds = stableDevList((s && s.devices) ? s.devices.slice() : []);
 	var on = 0;
 	for (var i = 0; i < ds.length; i++) if (ds[i].online) on++;
 
@@ -415,7 +451,7 @@ function devicesCard(s) {
 		E('span', { 'class': 'c2' }, [ 'IP 地址' ]),
 		E('span', { 'class': 'c3' }, [ '状态' ])
 	]);
-	var items = [head];
+	var items = [];   /* ★ 表头不再放进滚动区 ✓ */
 	for (var i = 0; i < ds.length; i++) {
 		var d = ds[i];
 		items.push(E('div', { 'class': 'sk-row' }, [
@@ -429,49 +465,116 @@ function devicesCard(s) {
 	}
 	if (ds.length === 0) items.push(E('div', { 'class': 'sk-sub' }, [ '暂无设备' ]));
 	return E('div', { 'class': 'sk-card devices' }, [
-		E('div', { 'class': 'sk-title' }, [ icoImg('if'), '在线设备 ' + on + ' / ' + ds.length ]),
+		E('div', { 'class': 'sk-title' }, [ icoImg('if'), '在线设备 ' + on + ' / ' + ds.length ].concat(ds.length > 10 ? [ E('span', { 'class': 'sk-hint' }, [ '↕ 可滚动' ]) ] : [])),
+		head,
 		E('div', { 'class': 'sk-devlist' }, items)
 	]);
 }
 
 function trafficCard(s) {
-	var ds = (s && s.devices) ? s.devices.slice() : [];
-	var rows = [];
-	for (var i = 0; i < ds.length; i++) {
-		var d = ds[i];
-		var rxb = d.rx || 0, txb = d.tx || 0;
-		if (rxb + txb <= 0) continue;
-		rows.push({ d: d, tot: rxb + txb });
-	}
-	rows.sort(function (a, b) { return b.tot - a.tot; });
+	/* 周期选择存全局：每 3 秒轮询会重建 DOM，用全局才不会丢 ✓ */
+	if (!window.__sk_traf_p) window.__sk_traf_p = 'day';
+	var p = window.__sk_traf_p;
+	var b = (s && s.bandix) ? s.bandix : {};
+	var useB = !!(b.ok && b.devices && b.devices.length > 0);
 
-	var head = E('div', { 'class': 'sk-row sk-rhead' }, [
-		E('span', { 'class': 'c1' }, [ '设备名' ]),
-		E('span', { 'class': 'c2 sk-up' }, [ '↑ 上传' ]),
-		E('span', { 'class': 'c3x sk-dn' }, [ '↓ 下载' ])
-	]);
-	var items = [ head ];
-	for (var i = 0; i < rows.length && i < 30; i++) {
-		var d = rows[i].d;
-		items.push(E('div', { 'class': 'sk-row' }, [
-			E('span', { 'class': 'c1', 'title': devName(d) }, [ devName(d) ]),
-			E('span', { 'class': 'c2 sk-up' }, [ d.tx_s || '—' ]),
-			E('span', { 'class': 'c3x sk-dn' }, [ d.rx_s || '—' ])
-		]));
-	}
-	var isNlbw = (rows.length > 0 && rows[0].d.src === 'nlbw');
-	if (rows.length === 0) items.push(E('div', { 'class': 'sk-sub' }, [ '暂无流量数据' ]));
+	var items = [], note = '暂无数据', tot = '—', headEl = null;
+	var PN = { day: '近 24 小时', week: '近 7 天', month: '近 30 天' };
 
-	var t = (s && s.traffic) ? s.traffic : {};
-	var note = isNlbw ? '今日累计 ✓' : (rows.length > 0 ? '当前连接（非累计 ⚠️）' : '暂无数据');
-	return E('div', { 'class': 'sk-card traffic' }, [
-		E('div', { 'class': 'sk-title' }, [ icoImg('net'), '流量使用情况' ]),
-		E('div', { 'class': 'sk-devlist' }, items),
-		E('div', { 'class': 'sk-tv' }, [
-			E('span', { 'class': 'tk' }, [ note ]),
-			E('span', { 'class': 'tv' }, [ t.tot_total_s || '—' ])
-		])
-	]);
+	if (useB) {
+		/* ===== bandix 模式：滚动窗口累计流量 ✓ ===== */
+		var arr = b.devices.slice().sort(function (x, y) {
+			return (((y[p] || {}).total) || 0) - (((x[p] || {}).total) || 0);
+		});
+		/* ★ 表头放到滚动区外面 ✓ */
+		headEl = E('div', { 'class': 'sk-row sk-rhead' }, [
+			E('span', { 'class': 'c1' }, [ '设备名' ]),
+			E('span', { 'class': 'c2 sk-up' }, [ '↑ 上传' ]),
+			E('span', { 'class': 'c3x sk-dn' }, [ '↓ 下载' ])
+		]);
+		/* ★ 汇总必须遍历【全部】设备，不能只算显示的前 30 台 ✓ */
+		var sumB = 0;
+		for (var k0 = 0; k0 < arr.length; k0++) sumB += (arr[k0][p] || {}).total || 0;
+		/* ★ 全量渲染，可视行数交给 .sk-devlist 的 max-height（超出滚动）✓ */
+		for (var i = 0; i < arr.length && i < 60; i++) {
+			var d = arr[i], pr = d[p] || {};
+			var nm = d.host || d.ip || devName(d);
+			items.push(E('div', { 'class': 'sk-row' }, [
+				E('span', { 'class': 'c1', 'title': nm + (d.mac ? ' · ' + d.mac : '') }, [ nm ]),
+				E('span', { 'class': 'c2 sk-up' }, [ pr.tx_s || '—' ]),
+				E('span', { 'class': 'c3x sk-dn' }, [ pr.rx_s || '—' ])
+			]));
+		}
+		if (arr.length === 0) items.push(E('div', { 'class': 'sk-sub' }, [ '暂无流量数据' ]));
+		note = PN[p] + '累计 ✓';
+		if (arr.length > 10) note += ' · ↕ 可滚动';
+		/* ★ 数据过期提醒（采集脚本挂掉时不再"假装正常"）✓ */
+		if (typeof b.age === 'number' && b.age > 180)
+			note += ' · 数据 ' + Math.round(b.age / 60) + ' 分钟前 ⚠️';
+		/* ★ 单位修正：sumB 是【字节】，fmtSize 要【KB】✓ */
+		tot = fmtSize(sumB / 1024);
+	} else {
+		/* ===== 只认 bandix：没有数据就如实提示，不再兜底 ✓ ===== */
+		var st = b.state || 'absent';
+		if (st === 'absent' || b.installed === false) {
+			note = '未安装 bandix 插件';
+			items.push(E('div', { 'class': 'sk-empty' }, [
+				E('div', { 'class': 'sk-empty-t' }, [ '未安装 bandix 插件' ]),
+				E('div', { 'class': 'sk-sub' }, [
+					'流量使用情况依赖 bandix 统计，安装后即可显示 日 / 周 / 月 累计流量'
+				])
+			]));
+		} else if (b.api_up === false) {
+			note = 'bandix 未运行 ⚠️';
+			items.push(E('div', { 'class': 'sk-empty' }, [
+				E('div', { 'class': 'sk-empty-t' }, [ 'bandix 插件未运行' ]),
+				E('div', { 'class': 'sk-sub' }, [
+					'服务未启动（端口 8686 无监听），请检查 bandix 服务状态'
+				])
+			]));
+		} else {
+			note = '暂无数据';
+			items.push(E('div', { 'class': 'sk-empty' }, [
+				E('div', { 'class': 'sk-empty-t' }, [ '暂无流量数据' ]),
+				E('div', { 'class': 'sk-sub' }, [
+					'bandix 已安装，但尚未采集到设备流量'
+				])
+			]));
+		}
+		tot = '—';
+	}
+
+	/* 标题 + 日/周/月 切换 */
+	var titleKids = [ icoImg('net'), '流量使用情况' ];
+	if (useB) {
+		var lb = [ [ 'day', '日' ], [ 'week', '周' ], [ 'month', '月' ] ];
+		var btns = [];
+		for (var j = 0; j < lb.length; j++) {
+			btns.push(E('button', {
+				'class': 'sk-segb' + (p === lb[j][0] ? ' on' : ''),
+				'click': (function (k) {
+					return function (ev) {
+						ev.preventDefault();
+						window.__sk_traf_p = k;
+						var el = ev.currentTarget || ev.target;
+						var card = (el && el.closest) ? el.closest('.sk-card') : null;
+						if (card && card.parentNode)
+							card.parentNode.replaceChild(trafficCard(window.__sk_st || s), card);
+					};
+				})(lb[j][0])
+			}, [ lb[j][1] ]));
+		}
+		titleKids.push(E('span', { 'class': 'sk-seg' }, btns));
+	}
+
+	var kids = [ E('div', { 'class': 'sk-title' }, titleKids) ];
+	if (headEl) kids.push(headEl);
+	kids.push(E('div', { 'class': 'sk-devlist' }, items));
+	kids.push(E('div', { 'class': 'sk-tv' }, [
+		E('span', { 'class': 'tk' }, [ note ]),
+		E('span', { 'class': 'tv' }, [ tot ])
+	]));
+	return E('div', { 'class': 'sk-card traffic' }, kids);
 }
 
 var __dkBusy = false;
@@ -515,6 +618,58 @@ function dockerAct(name, act) {
 		.then(function () { __dkBusy = false; if (window.__sk_st && window.__sk_draw) window.__sk_draw(window.__sk_st); });
 }
 
+/* ★ 自定义悬浮提示（鼠标位置判定版）✓
+   根因：页面每 3 秒整卡重绘，元素被反复替换 →
+        原生 title 来不及弹；逐元素 mouseenter/mouseleave 会因元素被移除而误触发 ✗
+   对策：监听 document 的 mousemove，用 elementFromPoint 判定指针下有没有 data-tip ✓
+        重绘不影响判定；同一条内容不重排（不抖动），内容变了才重弹 ✓ */
+var __skTipEl = null, __skTipTxt = null;
+function skTipShow(txt, ev) {
+	if (!txt) return;
+	if (!__skTipEl) {
+		__skTipEl = E('div', { 'class': 'sk-tip' }, []);
+		document.body.appendChild(__skTipEl);
+	}
+	__skTipEl.textContent = txt;
+	__skTipEl.style.display = 'block';
+	var w = __skTipEl.offsetWidth, h = __skTipEl.offsetHeight;
+	var vw = window.innerWidth || 9999, vh = window.innerHeight || 9999;
+	var cx = (ev && ev.clientX) || 40, cy = (ev && ev.clientY) || 40;
+	var x = cx + 14, y = cy + 18;
+	if (x + w > vw - 8) x = Math.max(8, vw - w - 8);
+	if (y + h > vh - 8) y = Math.max(8, cy - h - 12);
+	__skTipEl.style.left = x + 'px';
+	__skTipEl.style.top = y + 'px';
+	__skTipTxt = txt;
+}
+function skTipHide() { __skTipTxt = null; if (__skTipEl) __skTipEl.style.display = 'none'; }
+function skTipInit() {
+	if (window.__sk_tipInit) return;
+	window.__sk_tipInit = true;
+	document.addEventListener('mousemove', function (ev) {
+		var el = (document.elementFromPoint ? document.elementFromPoint(ev.clientX, ev.clientY) : null);
+		while (el && el !== document.body) {
+			if (el.getAttribute && el.getAttribute('data-tip')) {
+				var t = el.getAttribute('data-tip');
+				if (t !== __skTipTxt) skTipShow(t, ev);
+				return;
+			}
+			el = el.parentNode;
+		}
+		if (__skTipTxt) skTipHide();
+	});
+	window.addEventListener('scroll', skTipHide, true);
+}
+
+function dkChip(label, val) {
+	var t = (val === undefined || val === null || val === '') ? '—' : String(val);
+	t = t.replace(/\s*[,;、]\s*/g, String.fromCharCode(10));
+	return E('span', {
+		'class': 'di', 'data-tip': t,
+		'aria-label': label + '：' + t.split(String.fromCharCode(10)).join('，')
+	}, [ label ]);
+}
+
 function dockerCard() {
 	var list = window.__sk_dk || [];
 	var svcOn = (window.__sk_dksvc === true);
@@ -548,11 +703,12 @@ function dockerCard() {
 		} else {
 			btns.push(E('button', { 'class': 'bt pri', 'click': function (n) { return function () { dockerAct(n, 'start'); }; }(c.name) }, [ '启动' ]));
 		}
-		var detail = [];
-		detail.push(E('span', { 'class': 'di' }, [ '📦 ' + (c.image || '—') ]));
-		detail.push(E('span', { 'class': 'di' }, [ '🔌 ' + (c.ports || '无端口') ]));
-		detail.push(E('span', { 'class': 'di' }, [ '💾 ' + (c.mounts || '无挂载') ]));
-		detail.push(E('span', { 'class': 'di' }, [ '🌐 ' + (c.nets || '—') ]));
+		var detail = [
+			dkChip('仓库名称', c.image || '—'),
+			dkChip('端口信息', c.ports || '无端口'),
+			dkChip('文件挂载', c.mounts || '无挂载'),
+			dkChip('网络', c.nets || '—')
+		];
 		items.push(E('div', { 'class': 'sk-dkb' }, [
 			E('div', { 'class': 'sk-dk' }, [
 				E('span', { 'class': 'nm', 'title': c.name }, [ c.name ]),
@@ -744,6 +900,9 @@ return view.extend({
 			var inner2 = [];
 			if (window.__sk_wx) inner2.push(weatherCard(window.__sk_wx));
 			inner2 = inner2.concat(rows);
+			/* ★ 重绘前记住各列表的滚动位置，重绘后还原 —— 轮询刷新不再把列表"甩"回顶部 ✓ */
+			var oldL = wrap.querySelectorAll('.sk-devlist, .sk-dklist'), oldT = [], oi;
+			for (oi = 0; oi < oldL.length; oi++) oldT.push(oldL[oi].scrollTop);
 			wrap.replaceChildren(E('div', { 'class': 'sk-wrap' }, [
 				E('div', { 'class': 'sk-main' }, inner2),
 				E('div', { 'class': 'sk-side' }, [ netInfoCard(s), disksCard(s) ]),
@@ -751,7 +910,12 @@ return view.extend({
 				trafficCard(s),
 				dockerCard()
 			]));
+			var newL = wrap.querySelectorAll('.sk-devlist, .sk-dklist');
+			for (oi = 0; oi < newL.length && oi < oldT.length; oi++) newL[oi].scrollTop = oldT[oi];
 		}
+
+		/* 悬浮提示：委托监听只装一次（页面每 3 秒重绘，必须委托才存活）✓ */
+		skTipInit();
 
 		/* 时钟：每秒走 ✓ */
 		if (!window.__sk_clock) {
@@ -777,6 +941,8 @@ return view.extend({
 		poll.add(function () {
 			return callStatus().then(function (s) {
 				if (s && typeof s === 'object') {
+					/* ★ 鼠标正停在列表里（正在仔细看）时跳过这次重绘，不打断阅读 ✓ */
+					if (document.querySelector('.sk-devlist:hover, .sk-dklist:hover')) return;
 					s.mem_used_s = fmtSize(s.mem_used);
 					s.mem_total_s = fmtSize(s.mem_total);
 					s.temp_s = (s.temp != null) ? (Math.round(s.temp) + '℃') : '—';

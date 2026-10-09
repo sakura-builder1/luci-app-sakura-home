@@ -13,7 +13,7 @@ do_status() {
 
 	# 用临时文件避免管道子shell ✗（jshn 的改动会丢 ✓）
 	TMP=/tmp/.sakura_dk_list
-	/usr/bin/docker ps -a --format '{{.Names}}@@{{.State}}@@{{.Status}}@@{{.Image}}@@{{.Ports}}@@{{.Mounts}}@@{{.Networks}}' > "$TMP" 2>/dev/null
+	/usr/bin/docker ps -a --format '{{.Names}}@@{{.State}}@@{{.Status}}@@{{.Image}}' > "$TMP" 2>/dev/null
 
 	json_add_array containers
 	while IFS= read -r LINE; do
@@ -22,10 +22,18 @@ do_status() {
 		s=$(echo "$LINE" | awk -F'@@' '{print $2}')
 		t=$(echo "$LINE" | awk -F'@@' '{print $3}')
 		i=$(echo "$LINE" | awk -F'@@' '{print $4}')
-		p=$(echo "$LINE" | awk -F'@@' '{print $5}')
-		m=$(echo "$LINE" | awk -F'@@' '{print $6}')
-		w=$(echo "$LINE" | awk -F'@@' '{print $7}')
 		[ -z "$n" ] && continue
+
+		# ★ 一条 inspect 取齐 端口 / 网络 / 挂载 ✓
+		#   端口 → 只留「宿主端口:容器端口/协议」，去掉 0.0.0.0 与 ::: 前缀，
+		#          IPv4+IPv6 重复项自动合并（原来一长串，看着太累 ✓）
+		#   网络 → 「网络名: IP」（原来只给网络名，看不出容器 IP ✓）
+		#   挂载 → docker ps 的 {{.Mounts}} 会被 … 截断 ✗，必须走 inspect ✓
+		INK=$(/usr/bin/docker inspect -f '{{range $k,$v := .HostConfig.PortBindings}}{{range $v}}{{if .HostPort}}{{.HostPort}}:{{$k}},{{end}}{{end}}{{end}}@@{{range $k,$v := .NetworkSettings.Networks}}{{if $v.IPAddress}}{{$k}}: {{$v.IPAddress}},{{end}}{{end}}@@{{range .Mounts}}{{if .Source}}{{.Source}}:{{.Destination}}{{else}}{{.Name}}:{{.Destination}}{{end}},{{end}}' "$n" 2>/dev/null)
+		p=$(printf '%s' "$INK" | awk -F'@@' '{print $1}' | tr ',' '\n' | awk 'NF && !s[$0]++' | tr '\n' ',' | sed -e 's/,$//' -e 's/,/, /g')
+		w=$(printf '%s' "$INK" | awk -F'@@' '{print $2}' | sed -e 's/,$//' -e 's/,/, /g')
+		m=$(printf '%s' "$INK" | awk -F'@@' '{print $3}' | sed -e 's/,$//' -e 's/,/, /g')
+
 		json_add_object
 		json_add_string name "$n"
 		json_add_string state "$s"

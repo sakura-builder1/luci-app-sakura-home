@@ -21,7 +21,7 @@
 | 🌐 **网络连接和 IP** | 连接状态 + 在线时长 + IPv4/IPv6/DNS + **网口横向滑动** ✓ |
 | 💾 **磁盘存储** | 各挂载点用量条（超 85% 变红）✓ 可滚动 |
 | 📱 **在线设备** | 设备名 / IP / 在线状态 三列 ✓ 可滚动 |
-| 📊 **流量使用** | 按设备统计上下行（nlbwmon 今日累计 / conntrack 兜底）|
+| 📊 **流量使用** | 按设备统计上下行（**bandix** 日 / 周 / 月 滚动累计；未装则提示安装）|
 | 🐳 **Docker** | 服务开关 ✓ 容器列表（镜像/端口/挂载/网络）✓ 启停/重启 ✓ |
 
 ### 🎨 主题联动
@@ -62,7 +62,7 @@ LuCI ---> Applications ---> <*> luci-app-sakura-home
 
 | 包 | 用途 | 不装的后果 |
 |---|---|---|
-| `nlbwmon` | **按设备**流量统计（今日累计）| 自动降级为 conntrack 快照（非累计）|
+| `bandix` | **按设备**流量统计（日 / 周 / 月 滚动累计）| 该卡片显示「未安装 bandix 插件」|
 | `docker` / `dockerd` | Docker 容器卡片 | 该卡片显示「Docker 服务未运行」|
 | `luci-app-dlna-player` | 与 DLNA 音乐播放器配合 | 不影响本插件 |
 
@@ -77,7 +77,8 @@ luci-app-sakura-home/
 ├── Makefile
 ├── htdocs/luci-static/resources/view/sakura-home.js   # 前端
 ├── htdocs/luci-static/sakura-home/icon/*.png          # AI 生成图标
-├── root/usr/bin/sakura-weather-fetch                  # 天气/流量/磁盘抓取
+├── root/usr/bin/sakura-weather-fetch                  # 天气/公网IP/磁盘抓取
+├── root/usr/bin/sakura-bandix-fetch                   # bandix 每设备流量采集（cron）
 ├── root/usr/libexec/rpcd/luci.sakura_home             # 数据后端（ucode）
 ├── root/usr/libexec/rpcd/luci.sakura_docker           # Docker 控制（shell）
 ├── root/etc/uci-defaults/50-sakura-home               # cron 安装

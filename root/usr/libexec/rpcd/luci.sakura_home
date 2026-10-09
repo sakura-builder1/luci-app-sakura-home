@@ -33,62 +33,189 @@ function fmt_rate(b) {
 	if (b >= 1024) return sprintf('%.2f KB/s', b / 1024);
 	return sprintf('%.0f B/s', b);
 }
-/* 每设备今日流量（读 nlbwmon 缓存 ✓ 按日统计 ✓）*/
-function get_dev_traffic() {
-	let out = [];
-	let c = rf('/tmp/sakura_dev_traffic.cache') || '';
-	let ls = split(c, '\n');
+/* ---------------------------------------------------------------
+ * Bandix 每设备 日/周/月 流量（读 shell 脚本生成的原始 JSON ✓）
+ * 数据源：/tmp/sakura_bandix/  （由 sakura-bandix-fetch 每分钟生成）
+ * 说明：ucode 沙箱禁 popen ✗ → 只能读文件 ✓；JSON 解析用 json() ✓
+ * ---------------------------------------------------------------*/
+let BANDIX_DIR = '/tmp/sakura_bandix';
+let BANDIX_TZ  = 28800;   /* UTC+8 */
+
+function bandix_enabled() {
+	let c = rf('/etc/config/sakura') || '';
+	let ls = split(c, '
+');
+	let inSec = false;
 	for (let i = 0; i < length(ls); i++) {
-		let p = split(ls[i], '|');
-		if (length(p) < 4) continue;
-		let ip = p[0], mac = p[1];
-		let rx = +p[2], tx = +p[3];
-		if (ip == '0.0.0.0' || ip == '') continue;
-		push(out, {
-			ip: ip, mac: mac, rx: rx, tx: tx, total: rx + tx,
-			rx_s: fmt_size(rx / 1024), tx_s: fmt_size(tx / 1024),
-			total_s: fmt_size((rx + tx) / 1024), src: 'nlbw'
-		});
-	}
-	/* 兜底：nlbwmon 没数据时用 conntrack 快照 ✓ */
-	if (length(out) == 0) {
-		let rx = {}, tx = {};
-		let cc = rf('/proc/net/nf_conntrack') || '';
-		let cls = split(cc, '\n');
-		for (let i = 0; i < length(cls); i++) {
-			let ln = cls[i];
-			if (!ln || length(ln) < 20) continue;
-			let segs = split(ln, 'src=');
-			for (let j = 1; j < length(segs); j++) {
-				let sg = segs[j];
-				let mip = match(sg, /^([0-9.]+)/);
-				let mb = match(sg, /bytes=([0-9]+)/);
-				if (!mip || !mb) continue;
-				let s2 = mip[1], by = +mb[1];
-				if (by <= 0) continue;
-				let md = match(sg, /dst=([0-9.]+)/);
-				let d2 = md ? md[1] : '';
-				let SP = /^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/;
-				let sp = match(s2, SP), dp = match(d2, SP);
-				if (sp && !dp) tx[s2] = (tx[s2] || 0) + by;
-				else if (!sp && dp) rx[d2] = (rx[d2] || 0) + by;
-				else if (sp && dp) tx[s2] = (tx[s2] || 0) + by;
-			}
-		}
-		let seen = {};
-		for (let ip in tx) { seen[ip] = 1; }
-		for (let ip in rx) { seen[ip] = 1; }
-		for (let ip in seen) {
-			let r_ = rx[ip] || 0, t_ = tx[ip] || 0;
-			if (r_ + t_ <= 0) continue;
-			push(out, {
-				ip: ip, mac: '', rx: r_, tx: t_, total: r_ + t_,
-				rx_s: fmt_size(r_ / 1024), tx_s: fmt_size(t_ / 1024),
-				total_s: fmt_size((r_ + t_) / 1024), src: 'conntrack'
-			});
+		let t = trim(ls[i]);
+		if (match(t, /^config\s+bandix/)) { inSec = true; continue; }
+		if (match(t, /^config\s+/)) { inSec = false; continue; }
+		if (inSec) {
+			let m = match(t, /^option\s+enabled\s+['"]?([^'"]+)['"]?/);
+			if (m) return (m[1] == '1' || m[1] == 'on' || m[1] == 'true');
 		}
 	}
-	return out;
+	return false;
+}
+
+function bandix_set_enabled(on) {
+	let c = rf('/etc/config/sakura') || '';
+	let ls = split(c, '
+');
+	let out = [];
+	let inSec = false, hasSec = false;
+	let val = on ? '1' : '0';
+	for (let i = 0; i < length(ls); i++) {
+		let ln = ls[i];
+		let t = trim(ln);
+		if (match(t, /^config\s+bandix/)) {
+			hasSec = true; inSec = true;
+			push(out, ln);
+			push(out, sprintf("	option enabled '%s'", val));
+			continue;
+		}
+		if (inSec && match(t, /^config\s+/)) inSec = false;
+		if (inSec && match(t, /^option\s+enabled\s/)) continue;   /* 丢弃旧值 ✓ */
+		push(out, ln);
+	}
+	if (!hasSec) {
+		push(out, '');
+		push(out, 'config bandix');
+		push(out, sprintf("	option enabled '%s'", val));
+	}
+	wf('/etc/config/sakura', join('
+', out));
+	/* 同步 uci 内部状态（尽力而为 ✓）*/
+	try {
+		let u = ubus_connect();
+		u.call('uci', 'set', { config: 'sakura', section: 'bandix', values: { enabled: val } });
+		u.call('uci', 'commit', { config: 'sakura' });
+		u.disconnect();
+	} catch (e) { }
+	return true;
+}
+
+/* 计算 [st,en] 与 [edge, now_ms] 的重叠比例（0~1）✓
+ * ★ 必须定义在调用者之前：ucode 不支持前向引用 ✗ */
+function bandix_overlap(st, en, edge, now_ms) {
+	if (en <= edge || st >= now_ms) return 0;
+	/* ★ 进行中的桶：数据只累积到"现在"，分母必须用 now-st；
+	 *   若用整天 en-st 会【低估】(实测低估约 38%) ✗ */
+	let span = (now_ms < en) ? (now_ms - st) : (en - st);
+	if (span <= 0) return 0;
+	let lo = (st > edge) ? st : edge;
+	if (lo >= now_ms) return 0;
+	/* ★ 必须乘 1.0：ucode 整数除法会截断成 0 ✗ */
+	return (now_ms - lo) * 1.0 / span;
+}
+
+/* 汇总某设备某网络的增量数据 → { day, week, month }（单位：字节）
+ * ★ 全部用【滚动窗口】比较，彻底避开 bandix 用 UTC 日边界、
+ *   而系统用 CST 导致的 8 小时错位问题 ✓
+ *   同时用 inc 的 [start,end] 区间与窗口求交，按比例折算，
+ *   避免"跨窗口的那一条整天数据"被整条计入或整条丢弃 ✓ */
+function bandix_sum_dev(mac, net, day_ms, week_ms, mon_ms) {
+	let res = { day_rx: 0, day_tx: 0, week_rx: 0, week_tx: 0, mon_rx: 0, mon_tx: 0 };
+	let f = rf(sprintf('%s/%s_%s.json', BANDIX_DIR, net, mac));
+	if (!f) return res;
+	let j = null;
+	try { j = json(f); } catch (e) { return res; }
+	if (!j || !j.data || !j.data.inc) return res;
+	/* wan 网络用 w_* 字段，lan 网络用 l_* 字段 ✓ */
+	let pf = (net == 'lan') ? 'l_' : 'w_';
+	let inc = j.data.inc;
+	for (let k = 0; k < length(inc); k++) {
+		let it = inc[k];
+		let st = num(it.start), en = num(it.end);
+		let rx = num(it[pf + 'rx_b']), tx = num(it[pf + 'tx_b']);
+		if (rx == 0 && tx == 0) continue;
+		if (en <= st) { en = st + 86400000; }   /* 兜底：缺 end 时按 1 天算 ✓ */
+		let span = en - st;
+		/* 当前时刻（本设备文件内自取，避免再多传参数 ✓） */
+		let now_ms = time() * 1000;
+		/* 与各窗口 [edge, now] 的重叠比例 ✓ */
+		let f_mon  = bandix_overlap(st, en, mon_ms,  now_ms);
+		let f_week = bandix_overlap(st, en, week_ms, now_ms);
+		let f_day  = bandix_overlap(st, en, day_ms,  now_ms);
+		res.mon_rx  += int(rx * f_mon);  res.mon_tx  += int(tx * f_mon);
+		res.week_rx += int(rx * f_week); res.week_tx += int(tx * f_week);
+		res.day_rx  += int(rx * f_day);  res.day_tx  += int(tx * f_day);
+	}
+	return res;
+}
+
+/* 探测 bandix 环境 ✓
+ * ucode 沙箱禁 popen → 全部改用【读文件】判断，不依赖任何外部命令 */
+function bandix_probe() {
+	let r = { installed: false, api_up: false, fetch: false, conf: false, bin: false };
+	if (rf('/usr/bin/sakura-bandix-fetch')) r.fetch = true;
+	if (rf('/etc/config/bandix')) r.conf = true;
+	if (rf('/usr/bin/bandix') || rf('/usr/sbin/bandix')) r.bin = true;
+	try {
+		let stt = rf('/usr/lib/opkg/status');
+		if (stt && match(stt, /Package:\s*bandix\b/)) r.bin = true;
+	} catch (e) { }
+	/* API 是否在监听 8686(0x21EE) ✓ 读 /proc/net/tcp，杜绝 popen */
+	let tcp = sstr(rf('/proc/net/tcp')) + sstr(rf('/proc/net/tcp6'));
+	if (match(tcp, /:21EE\s/) || match(tcp, /:21ee\s/)) r.api_up = true;
+	/* 三者任一即视为"装过"（用户可能只用 API 不用脚本）*/
+	r.installed = (r.conf || r.bin || r.fetch);
+	return r;
+}
+
+function get_bandix_data() {
+	let now = time();
+	let pr = bandix_probe();
+	let ts = num(trim(rf(sprintf('%s/ts', BANDIX_DIR)) || '0'));
+	let o = {
+		ok: false, enabled: bandix_enabled(),
+		installed: pr.installed, api_up: pr.api_up, has_fetch: pr.fetch,
+		/* state: ok | stale | idle(装了没数据) | absent(根本没装) */
+		state: pr.installed ? 'idle' : 'absent',
+		ts: ts, age: (ts > 0) ? (now - ts) : -1,
+		devices: []
+	};
+
+	let ds = rf(sprintf('%s/devices.json', BANDIX_DIR));
+	if (!ds) return o;
+	let dj = null;
+	try { dj = json(ds); } catch (e) { return o; }
+	if (!dj || !dj.data || !dj.data.d) return o;
+	o.ok = true;
+	o.state = (ts > 0 && (now - ts) > 180) ? 'stale' : 'ok';
+
+	/* ★ 滚动窗口（近 24 小时 / 近 7 天 / 近 30 天）
+	 *   不用"自然日/周/月"，彻底避开 UTC↔CST 边界错位 ✓ */
+	let now_ms  = now * 1000;
+	let day_ms  = now_ms - 86400 * 1000;
+	let week_ms = now_ms - 7 * 86400 * 1000;
+	let mon_ms  = now_ms - 30 * 86400 * 1000;
+
+	let devs = dj.data.d;
+	for (let i = 0; i < length(devs); i++) {
+		let d = devs[i];
+		let mac = sstr(d.mac);
+		if (length(mac) == 0) continue;
+		let w = bandix_sum_dev(mac, 'wan', day_ms, week_ms, mon_ms);
+		/* 展示以 WAN 为主（外网流量 = 通常说的"用了多少流量"✓）*/
+		let rec = {
+			ip: d.ip4, mac: mac, host: sstr(d.host),
+			day:   { rx: w.day_rx,   tx: w.day_tx,   total: w.day_rx + w.day_tx },
+			week:  { rx: w.week_rx,  tx: w.week_tx,  total: w.week_rx + w.week_tx },
+			month: { rx: w.mon_rx,   tx: w.mon_tx,   total: w.mon_rx + w.mon_tx }
+		};
+		rec.day.rx_s   = fmt_size(rec.day.rx / 1024);
+		rec.day.tx_s   = fmt_size(rec.day.tx / 1024);
+		rec.day.total_s = fmt_size(rec.day.total / 1024);
+		rec.week.rx_s  = fmt_size(rec.week.rx / 1024);
+		rec.week.tx_s  = fmt_size(rec.week.tx / 1024);
+		rec.week.total_s = fmt_size(rec.week.total / 1024);
+		rec.month.rx_s = fmt_size(rec.month.rx / 1024);
+		rec.month.tx_s = fmt_size(rec.month.tx / 1024);
+		rec.month.total_s = fmt_size(rec.month.total / 1024);
+		push(o.devices, rec);
+	}
+	return o;
 }
 
 
@@ -442,19 +569,8 @@ function get_status() {
 
 	out.disks = get_disks();
 	out.devices = get_devices();
-	let dt = get_dev_traffic();
-	for (let i = 0; i < length(out.devices); i++) {
-		let d = out.devices[i];
-		for (let j = 0; j < length(dt); j++) {
-			if (dt[j].ip == d.ip) {
-				d.rx_s = dt[j].rx_s; d.tx_s = dt[j].tx_s; d.total_s = dt[j].total_s;
-				d.rx = dt[j].rx; d.tx = dt[j].tx;
-				d.src = dt[j].src;      /* ★ 带上来源标记，前端据此显示"今日累计" */
-				break;
-			}
-		}
-	}
-	out.dev_traffic = dt;
+	/* ★ 流量统计只认 bandix ✓ 不再合并 nlbw / conntrack 兜底数据 */
+	out.bandix = get_bandix_data();
 	out.traffic = get_traffic();
 
 	/* 连接时长（WAN 的 uptime ✓）*/
@@ -556,15 +672,32 @@ function get_weather() {
 	return { ok: false, city: '', temp: '—', desc: '正在获取…', icon: '⏳', age: 0 };
 }
 let cmd = '';
+let cmdArg = '';
 for (let i = 0; i < length(ARGV); i++) {
 	let a = ARGV[i];
-	if (a == 'list' || a == 'status' || a == 'weather') { cmd = a; break; }
+	if (a == 'list' || a == 'status' || a == 'weather' || a == 'set_bandix') {
+		cmd = a;
+		if (i + 1 < length(ARGV)) cmdArg = ARGV[i + 1];
+		break;
+	}
 }
 
 let result = null;
-if (cmd == 'list') result = { status: { }, weather: { } };
+if (cmd == 'list') result = { status: { }, weather: { }, set_bandix: { on: '' } };
 else if (cmd == 'status') result = get_status();
 else if (cmd == 'weather') result = get_weather();
+else if (cmd == 'set_bandix') {
+	/* rpcd 传参：ARGV[1] 是 JSON 串（如 {"on":"1"}）✓ */
+	let on = false;
+	let v = null;
+	try { v = json(cmdArg); } catch (e) { }
+	if (v != null && v.on != null)
+		on = (v.on == '1' || v.on == 1 || v.on == true || v.on == 'on' || v.on == 'true');
+	else
+		on = (cmdArg == '1' || cmdArg == 'on' || cmdArg == 'true');
+	bandix_set_enabled(on);
+	result = { ok: true, enabled: bandix_enabled() };
+}
 else result = { error: 'unknown method' };
 
 if (result != null) print(sprintf('%.J', result));
