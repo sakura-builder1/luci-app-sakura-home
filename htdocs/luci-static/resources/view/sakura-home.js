@@ -59,8 +59,8 @@ var STYLE = [
 /* ★ 自定义悬浮提示：立即出现，且不受 .sk-dklist 的 overflow 裁切 ✓ */
 '.sk-tip{position:fixed;z-index:99999;display:none;max-width:min(72vw,560px);padding:.45rem .62rem;border-radius:9px;background:rgba(45,30,38,.96);color:#fff;font-size:.72rem;line-height:1.5;white-space:pre-wrap;word-break:break-all;box-shadow:0 6px 20px rgba(0,0,0,.32);pointer-events:none}',
 '.sk-dk{display:flex;align-items:center;gap:.5rem;font-size:.83rem}',
-/* ★ 容器多时最多显示 4 个，超出内部滚动（与磁盘/设备列表限高保持一致）✓ */
-'.sk-dklist{overflow-y:auto;flex:1 1 auto;margin-top:.2rem;scrollbar-width:thin;scrollbar-color:rgba(160,120,145,.3) transparent;max-height:17.75rem}',
+/* ★ 容器多时最多显示 5 个，超出内部滚动（与磁盘列表限高保持一致）✓ */
+'.sk-dklist{overflow-y:auto;flex:1 1 auto;margin-top:.2rem;scrollbar-width:thin;scrollbar-color:rgba(160,120,145,.3) transparent;max-height:22.3rem}',
 /* 与在线设备、流量列表及主题侧边栏统一：极细 + 透明轨道 ✓ */
 '.sk-dklist::-webkit-scrollbar{width:5px;height:1px}',
 '.sk-dklist::-webkit-scrollbar-track{background:transparent}',
@@ -86,8 +86,8 @@ var STYLE = [
 '.sk-grid.g1{grid-column:1 / 7;grid-row:2}',
 '.sk-grid.g2{grid-column:1 / 7;grid-row:3}',
 '.sk-side > .sk-card:not(.nic){flex:1 1 auto;display:flex;flex-direction:column}',
-/* ★ 磁盘多时卡片不再无限变长：固定显示 4 块，超出内部滚动 ✓ */
-'.sk-disks{display:flex;flex-direction:column;gap:.7rem;overflow-y:auto;flex:1 1 auto;padding-right:4px;scrollbar-width:thin;max-height:16.85rem;scrollbar-color:rgba(160,120,145,.3) transparent}',
+/* ★ 磁盘多时卡片不再无限变长：固定显示 5 块，超出内部滚动 ✓ */
+'.sk-disks{display:flex;flex-direction:column;gap:.7rem;overflow-y:auto;flex:1 1 auto;padding-right:4px;scrollbar-width:thin;max-height:21.4rem;scrollbar-color:rgba(160,120,145,.3) transparent}',
 /* 滚动条与在线设备/流量/Docker 列表统一：极细 + 透明轨道 ✓ */
 '.sk-disks::-webkit-scrollbar{width:5px;height:1px}',
 '.sk-disks::-webkit-scrollbar-track{background:transparent}',
