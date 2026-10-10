@@ -81,7 +81,8 @@ var STYLE = [
 '.sk-card.devices{grid-column:1 / 4;grid-row:4 / span 2;display:flex;flex-direction:column;min-height:260px}',
 '.sk-card.traffic{grid-column:4 / 7;grid-row:4 / span 2;display:flex;flex-direction:column;min-height:260px}',
 '.sk-card.nic{grid-column:7 / 9;grid-row:1 / span 2;display:flex;flex-direction:column;align-self:stretch}',
-'.sk-card.disks{grid-column:7 / 9;grid-row:3 / span 5;display:flex;flex-direction:column;align-self:stretch}',
+/* ★ 磁盘卡片高度跟随内容，不再被右栏栅格拉伸成一条 ✗（挂载多时由 .sk-disks 限高 + 滚动兜底 ✓） */
+'.sk-card.disks{grid-column:7 / 9;grid-row:3 / span 5;display:flex;flex-direction:column;align-self:start}',
 '.sk-wx{grid-column:1 / 7;grid-row:1}',
 '.sk-grid.g1{grid-column:1 / 7;grid-row:2}',
 '.sk-grid.g2{grid-column:1 / 7;grid-row:3}',
